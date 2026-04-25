@@ -1,0 +1,105 @@
+.modal.conflict-merge-modal,
+.conflict-merge-modal .modal {
+  width: min(1600px, 96vw);
+  max-width: 96vw;
+}
+
+.conflict-merge-modal .modal-content {
+  width: 100%;
+  overflow-y: hidden;
+}
+
+.conflict-compare-scroll {
+  max-height: min(64vh, 720px);
+  overflow: auto;
+}
+
+.conflict-compare-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.conflict-compare-table col {
+  width: 33.333%;
+}
+
+.conflict-compare-wrap {
+  margin-top: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--background-primary-alt);
+}
+
+.conflict-compare-header,
+.conflict-compare-body {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.conflict-compare-header {
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.conflict-compare-heading {
+  padding: 10px 12px;
+  font-weight: 600;
+  border-right: 1px solid var(--background-modifier-border);
+}
+
+.conflict-compare-heading:last-child {
+  border-right: 0;
+}
+
+.conflict-compare-body {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.conflict-compare-cell {
+  min-height: 1.7em;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  border-right: 1px solid var(--background-modifier-border);
+  border-bottom: 1px solid var(--background-modifier-border);
+  overflow-x: visible;
+  vertical-align: top;
+}
+
+.conflict-compare-cell:nth-child(3n) {
+  border-right: 0;
+}
+
+.conflict-compare-body > .conflict-compare-cell:nth-last-child(-n + 3) {
+  border-bottom: 0;
+}
+
+.conflict-merge-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.conflict-diff-left-only {
+  background: color-mix(in srgb, var(--color-red) 18%, transparent);
+}
+
+.conflict-diff-right-only {
+  background: color-mix(in srgb, var(--color-green) 18%, transparent);
+}
+
+.conflict-diff-changed {
+  background: color-mix(in srgb, var(--color-yellow) 20%, transparent);
+}
+
+.conflict-diff-merged.conflict-diff-left-only,
+.conflict-diff-merged.conflict-diff-right-only,
+.conflict-diff-merged.conflict-diff-changed {
+  background: color-mix(in srgb, var(--color-cyan) 18%, transparent);
+}

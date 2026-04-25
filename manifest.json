@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-conflict-merge",
+  "name": "Conflict Merge Assistant",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Detect Obsidian Sync conflict files and merge additive changes while preserving paragraph order.",
+  "author": "cyh",
+  "isDesktopOnly": false
+}

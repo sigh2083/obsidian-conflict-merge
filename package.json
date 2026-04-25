@@ -1,0 +1,16 @@
+{
+  "name": "obsidian-conflict-merge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Obsidian plugin for additive conflict merging.",
+  "main": "main.js",
+  "scripts": {
+    "build": "esbuild main.ts --bundle --outfile=main.js --format=cjs --platform=browser --external:obsidian",
+    "dev": "esbuild main.ts --bundle --outfile=main.js --format=cjs --platform=browser --external:obsidian --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "obsidian": "^1.8.9",
+    "typescript": "^5.8.3"
+  }
+}
