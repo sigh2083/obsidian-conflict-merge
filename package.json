@@ -1,12 +1,29 @@
 {
   "name": "obsidian-conflict-merge",
   "version": "0.1.0",
-  "private": true,
-  "description": "Obsidian plugin for additive conflict merging.",
+  "description": "Review Obsidian Sync conflicted copies and build conservative additive merge candidates.",
   "main": "main.js",
+  "license": "MIT",
+  "author": "cyh",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sigh2083/obsidian-conflict-merge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sigh2083/obsidian-conflict-merge/issues"
+  },
+  "homepage": "https://github.com/sigh2083/obsidian-conflict-merge#readme",
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "conflict",
+    "merge",
+    "sync"
+  ],
   "scripts": {
     "build": "esbuild main.ts --bundle --outfile=main.js --format=cjs --platform=browser --external:obsidian",
-    "dev": "esbuild main.ts --bundle --outfile=main.js --format=cjs --platform=browser --external:obsidian --watch"
+    "dev": "esbuild main.ts --bundle --outfile=main.js --format=cjs --platform=browser --external:obsidian --watch",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

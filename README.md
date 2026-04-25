@@ -1,32 +1,38 @@
 # Conflict Merge Assistant
 
-一个面向 Obsidian Sync 冲突文件的半自动合并插件原型。
+Conflict Merge Assistant is an Obsidian plugin for reviewing Obsidian Sync conflict files and building conservative additive merge candidates.
 
-## 目标
+It is designed for notes where conflicts usually come from appending new paragraphs, such as daily notes, work logs, meeting notes, and timestamped records. The plugin favors preservation over automatic deletion: it helps you compare the original note, the conflicted copy, and a proposed merged result before applying changes.
 
-- 自动检测 conflict / conflicted copy 文件
-- 找到对应原始笔记
-- 以三栏方式预览：
-  - 原始文件
-  - 冲突文件
-  - 合并结果
-- 默认采用“只增不删”的合并策略
-- 按段落保序合并，适合带时间戳的日志式笔记
-- 可按时间戳智能插入新增段落，而不是只按纯文本 diff 顺序拼接
+> Status: early public release. Please keep backups and review merge results before applying them to important notes.
 
-## 当前合并规则
+## Features
 
-1. 将两边内容按空行拆成段落块
-2. 使用 LCS 思路找出共同段落
-3. 对于共同段落之间的“新增区间”：
-   - 如果区间内的段落都能识别出时间戳，就按时间戳排序插入
-   - 如果不能稳定识别时间戳，就回退到保序文本合并
-4. 生成一个同时包含双方新增段落的结果
-5. 不主动删除任何一边已有内容
+- Detects Obsidian Sync conflict / conflicted-copy files.
+- Finds the likely original note next to the conflict file.
+- Shows a synchronized three-column review view:
+  - original note
+  - conflicted copy
+  - merged candidate
+- Builds additive merge candidates by preserving paragraphs from both sides.
+- Uses timestamp-aware insertion when paragraph timestamps can be recognized.
+- Falls back to stable ordered paragraph merging when timestamps are unavailable.
+- Lets users tune the conflict filename pattern and timestamp patterns in settings.
 
-这本质上更接近“按段落求并集”，而不是传统代码三方合并。
+## Merge Policy
 
-## 当前支持的时间戳
+This plugin intentionally behaves more like a paragraph union tool than a traditional destructive three-way merge.
+
+1. Split both notes into paragraph blocks.
+2. Find common paragraph anchors.
+3. Compare the inserted paragraph ranges between common anchors.
+4. If inserted paragraphs have recognizable timestamps, sort those additions by time.
+5. Otherwise, preserve the observed paragraph order.
+6. Generate a merged candidate that includes additions from both sides.
+
+The plugin does not intentionally delete content from either side.
+
+## Supported Timestamp Examples
 
 - `<!-- edited: 2026-04-17 22:57:10 +03:00 -->`
 - `09:42`
@@ -35,52 +41,67 @@
 - `2026-04-17T09:42:18`
 - `2026/04/17 09:42`
 
-现在会优先识别你这种 `<!-- edited: ... -->` 的注释时间戳。
-这些只是默认模式，你也可以在插件设置里改成自己的格式。
+The `<!-- edited: ... -->` form is recognized first because it is useful for append-only notes that preserve edit metadata.
 
-## 适合的笔记类型
+## Good Fits
 
-- 日志式 Daily Notes
-- 会议记录
-- 按时间递增追加内容的笔记
-- 大多数“主要是新增、很少改写旧段落”的 Markdown 文件
+- Daily notes
+- Meeting notes
+- Project logs
+- Timestamped work records
+- Markdown files where most changes are additions rather than edits to old text
 
-## 暂时的边界
+## Current Limits
 
-- 现在按“段落块”合并，不是逐字符 diff
-- 如果你会频繁在中间改写旧段落，而不是只追加新段落，仍然建议人工确认
-- conflict 文件名规则可能因你的 Sync 实际命名方式略有差异，可以在插件设置里改正则
-- 如果一段里没有可识别时间戳，插件会自动回退到普通保序合并
+- The merge model is paragraph-based, not character-based.
+- Heavily rewritten paragraphs still need careful manual review.
+- Obsidian Sync conflict file naming can vary, so the detection pattern may need adjustment.
+- This is not a replacement for backups or version control.
 
-## 本地开发
+## Installation
 
-1. 在这个目录执行 `npm install`
-2. 执行 `npm run build`
-3. 把以下文件复制到你的 vault 插件目录：
-   - `manifest.json`
-   - `versions.json`
-   - `main.js`
-   - `styles.css`
+### Manual Install
 
-Obsidian 插件目录通常是：
+1. Download or copy the files from `release/obsidian-conflict-merge/`.
+2. Place them in your vault at:
 
-`.obsidian/plugins/obsidian-conflict-merge/`
+   ```text
+   .obsidian/plugins/obsidian-conflict-merge/
+   ```
 
-## 工程状态
+3. Enable `Conflict Merge Assistant` in Obsidian community plugin settings.
 
-当前目录已经是标准的 Obsidian 插件源码结构，包含：
+The installable bundle contains:
 
 - `manifest.json`
 - `versions.json`
-- `main.ts`
+- `main.js`
 - `styles.css`
-- `package.json`
-- `tsconfig.json`
 
-## 下一步建议
+## Development
 
-如果你觉得这个方向对，我建议下一步继续补三件事：
+```bash
+npm install
+npm run build
+npm run typecheck
+```
 
-1. 加一个真正的段落级差异高亮，而不是只展示三栏全文
-2. 增加“自动应用但保留备份”的模式
-3. 用你的真实时间戳样例继续微调识别规则，让插入位置更贴近你的笔记习惯
+During development, copy the built plugin files into your Obsidian vault plugin folder or use the `release/obsidian-conflict-merge/` bundle as the manual-install source.
+
+## Repository Description
+
+Suggested GitHub repository description:
+
+```text
+Review Obsidian Sync conflicted copies and build conservative additive merge candidates.
+```
+
+Suggested topics:
+
+```text
+obsidian, obsidian-plugin, markdown, sync, conflict-resolution, merge-tool
+```
+
+## License
+
+MIT
