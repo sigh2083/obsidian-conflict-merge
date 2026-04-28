@@ -58,6 +58,32 @@ The `<!-- edited: ... -->` form is recognized first because it is useful for app
 - Obsidian Sync conflict file naming can vary, so the detection pattern may need adjustment.
 - This is not a replacement for backups or version control.
 
+## Roadmap
+
+Possible future improvements are prioritized around making the review flow closer to a focused Text Compare-style workflow inside Obsidian:
+
+1. Changed-lines view with expandable context
+   - Add a mode that shows only changed, left-only, and right-only rows.
+   - Keep a few unchanged context lines around each change.
+   - Let users expand hidden unchanged sections when they need the full surrounding note.
+
+2. Inline word and character highlighting
+   - Highlight the exact changed words or characters inside changed lines.
+   - Keep full-line coloring as the broad scan view, with inline highlights for precise review.
+
+3. Difference navigation
+   - Add previous/next change controls for long notes.
+   - Make navigation work with both full-view and changed-lines-only modes.
+
+4. Editable merged candidate
+   - Let users edit the merged candidate inside the review modal before applying it.
+   - Keep original and conflict content read-only.
+   - Preserve the backup and "Keep both" workflow so manual edits remain reviewable.
+
+5. Optional whitespace comparison modes
+   - Keep strict whitespace comparison as the default so spaces, tabs, and indentation changes are visible.
+   - Add an optional "ignore whitespace" mode for cases where formatting noise is not important.
+
 ## Installation
 
 ### Manual Install

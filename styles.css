@@ -32,30 +32,31 @@
   background: var(--background-primary-alt);
 }
 
-.conflict-compare-header,
-.conflict-compare-body {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.conflict-compare-header {
-  background: var(--background-secondary);
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-
 .conflict-compare-heading {
   padding: 10px 12px;
   font-weight: 600;
   border-right: 1px solid var(--background-modifier-border);
+  text-align: left;
+  vertical-align: top;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  white-space: normal;
 }
 
 .conflict-compare-heading:last-child {
   border-right: 0;
 }
 
-.conflict-compare-body {
-  max-height: 60vh;
-  overflow: auto;
+.conflict-compare-table thead,
+.conflict-compare-table tbody,
+.conflict-compare-table tr,
+.conflict-compare-table th,
+.conflict-compare-table td {
+  box-sizing: border-box;
+}
+
+.conflict-compare-row:last-child .conflict-compare-cell {
+  border-bottom: 0;
 }
 
 .conflict-compare-cell {
@@ -73,12 +74,8 @@
   vertical-align: top;
 }
 
-.conflict-compare-cell:nth-child(3n) {
+.conflict-compare-row .conflict-compare-cell:last-child {
   border-right: 0;
-}
-
-.conflict-compare-body > .conflict-compare-cell:nth-last-child(-n + 3) {
-  border-bottom: 0;
 }
 
 .conflict-merge-meta {

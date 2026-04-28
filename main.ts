@@ -55,6 +55,7 @@ interface LineDiffEntry {
 export default class ConflictMergePlugin extends Plugin {
   settings: ConflictMergeSettings = DEFAULT_SETTINGS;
   private processingPaths = new Set<string>();
+  private scheduledHandles = new Map<string, number>();
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -85,14 +86,14 @@ export default class ConflictMergePlugin extends Plugin {
     if (this.settings.watchCreates) {
       this.registerEvent(this.app.vault.on("create", (file) => {
         if (file instanceof TFile) {
-          void this.handleConflictFile(file, this.settings.autoOpenModal);
+          this.scheduleConflictHandling(file, this.settings.autoOpenModal);
         }
       }));
     }
 
     this.registerEvent(this.app.vault.on("rename", (file) => {
       if (file instanceof TFile) {
-        void this.handleConflictFile(file, false);
+        this.scheduleConflictHandling(file, this.settings.autoOpenModal);
       }
     }));
 
@@ -110,6 +111,13 @@ export default class ConflictMergePlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  onunload(): void {
+    for (const timer of this.scheduledHandles.values()) {
+      window.clearTimeout(timer);
+    }
+    this.scheduledHandles.clear();
+  }
+
   async findConflictPairs(): Promise<ConflictPair[]> {
     const files = this.app.vault.getMarkdownFiles();
     const pairs: ConflictPair[] = [];
@@ -122,6 +130,57 @@ export default class ConflictMergePlugin extends Plugin {
     }
 
     return pairs;
+  }
+
+  scheduleConflictHandling(file: TFile, openModal: boolean): void {
+    if (!this.isConflictFile(file)) {
+      return;
+    }
+
+    const existing = this.scheduledHandles.get(file.path);
+    if (existing) {
+      window.clearTimeout(existing);
+    }
+
+    const timer = window.setTimeout(() => {
+      this.scheduledHandles.delete(file.path);
+      void this.handleConflictFileWhenStable(file.path, openModal);
+    }, 600);
+
+    this.scheduledHandles.set(file.path, timer);
+  }
+
+  async handleConflictFileWhenStable(path: string, openModal: boolean): Promise<void> {
+    const stableFile = await this.waitForStableConflictFile(path);
+    if (!stableFile) {
+      return;
+    }
+
+    await this.handleConflictFile(stableFile, openModal);
+  }
+
+  async waitForStableConflictFile(path: string): Promise<TFile | null> {
+    let previousSnapshot: string | null = null;
+
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const current = this.app.vault.getAbstractFileByPath(path);
+      if (!(current instanceof TFile) || !this.isConflictFile(current)) {
+        return null;
+      }
+
+      const content = await this.app.vault.cachedRead(current);
+      const snapshot = `${current.stat.size}:${current.stat.mtime}:${content}`;
+
+      if (snapshot === previousSnapshot) {
+        return current;
+      }
+
+      previousSnapshot = snapshot;
+      await sleep(350);
+    }
+
+    const latest = this.app.vault.getAbstractFileByPath(path);
+    return latest instanceof TFile && this.isConflictFile(latest) ? latest : null;
   }
 
   async handleConflictFile(file: TFile, openModal: boolean): Promise<void> {
@@ -210,7 +269,7 @@ export default class ConflictMergePlugin extends Plugin {
     const originalContent = await this.app.vault.cachedRead(pair.original);
     const conflictContent = await this.app.vault.cachedRead(pair.conflict);
     const rows = buildLineDiffEntries(originalContent, conflictContent);
-    const mergedContent = buildMergedContentFromRows(originalContent, conflictContent, rows);
+    const mergedContent = buildMergedContentFromRows(rows);
     return { mergedContent, originalContent, conflictContent };
   }
 
@@ -506,8 +565,8 @@ class ConflictMergeSettingTab extends PluginSettingTab {
 }
 
 function mergeRunByLcs(originalRun: string[], conflictRun: string[]): string[] {
-  const originalKeys = originalRun.map(toComparableKey);
-  const conflictKeys = conflictRun.map(toComparableKey);
+  const originalKeys = originalRun;
+  const conflictKeys = conflictRun;
   const lcs = buildLcsTable(originalKeys, conflictKeys);
   const merged: string[] = [];
   let i = 0;
@@ -614,35 +673,35 @@ function appendChangedRun(entries: LineDiffEntry[], leftRun: string[], rightRun:
   const maxLength = Math.max(leftRun.length, rightRun.length);
 
   for (let index = 0; index < maxLength; index += 1) {
-    const left = leftRun[index] ?? "";
-    const right = rightRun[index] ?? "";
+    const hasLeft = index < leftRun.length;
+    const hasRight = index < rightRun.length;
+    const left = hasLeft ? leftRun[index] : "";
+    const right = hasRight ? rightRun[index] : "";
     entries.push({
       left,
       right,
-      merged: buildMergedCandidateCell(left, right),
-      state: getChangedRunState(left, right)
+      merged: buildMergedCandidateCell(left, right, hasLeft, hasRight),
+      state: getChangedRunState(left, right, hasLeft, hasRight)
     });
   }
 }
 
-function getChangedRunState(left: string, right: string): LineDiffEntry["state"] {
-  if (left.length && right.length) {
-    return toComparableKey(left) === toComparableKey(right) ? "same" : "changed";
+function getChangedRunState(left: string, right: string, hasLeft: boolean, hasRight: boolean): LineDiffEntry["state"] {
+  if (hasLeft && hasRight) {
+    return left === right ? "same" : "changed";
   }
-  return left.length ? "left-only" : "right-only";
+  return hasLeft ? "left-only" : "right-only";
 }
 
-function buildMergedCandidateCell(left: string, right: string): string {
-  if (!left.length || !right.length) {
-    return left || right;
+function buildMergedCandidateCell(left: string, right: string, hasLeft: boolean, hasRight: boolean): string {
+  if (!hasLeft || !hasRight) {
+    return hasLeft ? left : right;
   }
   return mergeRunByLcs([left], [right]).join("\n");
 }
 
-function buildMergedContentFromRows(originalContent: string, conflictContent: string, rows: LineDiffEntry[]): string {
-  const merged = rows.map((row) => row.merged).join("\n");
-  const hasTrailingNewline = /\n$/.test(originalContent) || /\n$/.test(conflictContent);
-  return hasTrailingNewline ? `${merged}\n` : merged;
+function buildMergedContentFromRows(rows: LineDiffEntry[]): string {
+  return rows.map((row) => row.merged).join("\n");
 }
 
 function getDiffBackground(
@@ -687,15 +746,11 @@ function normalizeLines(content: string): string[] {
   return content.replace(/\r\n/g, "\n").split("\n");
 }
 
-function toComparableKey(line: string): string {
-  return line.trim().replace(/\s+/g, " ");
-}
-
 function dedupeAdjacentBlocks(lines: string[]): string[] {
   const deduped: string[] = [];
 
   for (const line of lines) {
-    if (deduped.length && toComparableKey(deduped[deduped.length - 1]) === toComparableKey(line)) {
+    if (deduped.length && deduped[deduped.length - 1] === line) {
       continue;
     }
     deduped.push(line);
@@ -713,4 +768,8 @@ function timestampSlug(): string {
 function buildSiblingFilePath(file: TFile, label: string): string {
   const directory = file.parent?.path && file.parent.path !== "/" ? `${file.parent.path}/` : "";
   return normalizePath(`${directory}${file.basename} (${label}).${file.extension}`);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

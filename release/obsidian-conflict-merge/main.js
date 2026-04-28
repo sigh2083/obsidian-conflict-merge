@@ -42,6 +42,7 @@ var ConflictMergePlugin = class extends import_obsidian.Plugin {
     super(...arguments);
     this.settings = DEFAULT_SETTINGS;
     this.processingPaths = /* @__PURE__ */ new Set();
+    this.scheduledHandles = /* @__PURE__ */ new Map();
   }
   async onload() {
     await this.loadSettings();
@@ -69,13 +70,13 @@ var ConflictMergePlugin = class extends import_obsidian.Plugin {
     if (this.settings.watchCreates) {
       this.registerEvent(this.app.vault.on("create", (file) => {
         if (file instanceof import_obsidian.TFile) {
-          void this.handleConflictFile(file, this.settings.autoOpenModal);
+          this.scheduleConflictHandling(file, this.settings.autoOpenModal);
         }
       }));
     }
     this.registerEvent(this.app.vault.on("rename", (file) => {
       if (file instanceof import_obsidian.TFile) {
-        void this.handleConflictFile(file, false);
+        this.scheduleConflictHandling(file, this.settings.autoOpenModal);
       }
     }));
     if (this.settings.scanOnStartup) {
@@ -89,6 +90,12 @@ var ConflictMergePlugin = class extends import_obsidian.Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
   }
+  onunload() {
+    for (const timer of this.scheduledHandles.values()) {
+      window.clearTimeout(timer);
+    }
+    this.scheduledHandles.clear();
+  }
   async findConflictPairs() {
     const files = this.app.vault.getMarkdownFiles();
     const pairs = [];
@@ -99,6 +106,45 @@ var ConflictMergePlugin = class extends import_obsidian.Plugin {
       }
     }
     return pairs;
+  }
+  scheduleConflictHandling(file, openModal) {
+    if (!this.isConflictFile(file)) {
+      return;
+    }
+    const existing = this.scheduledHandles.get(file.path);
+    if (existing) {
+      window.clearTimeout(existing);
+    }
+    const timer = window.setTimeout(() => {
+      this.scheduledHandles.delete(file.path);
+      void this.handleConflictFileWhenStable(file.path, openModal);
+    }, 600);
+    this.scheduledHandles.set(file.path, timer);
+  }
+  async handleConflictFileWhenStable(path, openModal) {
+    const stableFile = await this.waitForStableConflictFile(path);
+    if (!stableFile) {
+      return;
+    }
+    await this.handleConflictFile(stableFile, openModal);
+  }
+  async waitForStableConflictFile(path) {
+    let previousSnapshot = null;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const current = this.app.vault.getAbstractFileByPath(path);
+      if (!(current instanceof import_obsidian.TFile) || !this.isConflictFile(current)) {
+        return null;
+      }
+      const content = await this.app.vault.cachedRead(current);
+      const snapshot = `${current.stat.size}:${current.stat.mtime}:${content}`;
+      if (snapshot === previousSnapshot) {
+        return current;
+      }
+      previousSnapshot = snapshot;
+      await sleep(350);
+    }
+    const latest = this.app.vault.getAbstractFileByPath(path);
+    return latest instanceof import_obsidian.TFile && this.isConflictFile(latest) ? latest : null;
   }
   async handleConflictFile(file, openModal) {
     if (!this.isConflictFile(file) || this.processingPaths.has(file.path)) {
@@ -171,7 +217,7 @@ var ConflictMergePlugin = class extends import_obsidian.Plugin {
     const originalContent = await this.app.vault.cachedRead(pair.original);
     const conflictContent = await this.app.vault.cachedRead(pair.conflict);
     const rows = buildLineDiffEntries(originalContent, conflictContent);
-    const mergedContent = buildMergedContentFromRows(originalContent, conflictContent, rows);
+    const mergedContent = buildMergedContentFromRows(rows);
     return { mergedContent, originalContent, conflictContent };
   }
   async openMergeModal(pair) {
@@ -394,8 +440,8 @@ var ConflictMergeSettingTab = class extends import_obsidian.PluginSettingTab {
   }
 };
 function mergeRunByLcs(originalRun, conflictRun) {
-  const originalKeys = originalRun.map(toComparableKey);
-  const conflictKeys = conflictRun.map(toComparableKey);
+  const originalKeys = originalRun;
+  const conflictKeys = conflictRun;
   const lcs = buildLcsTable(originalKeys, conflictKeys);
   const merged = [];
   let i = 0;
@@ -485,33 +531,32 @@ function buildLineDiffEntries(leftContent, rightContent) {
 function appendChangedRun(entries, leftRun, rightRun) {
   const maxLength = Math.max(leftRun.length, rightRun.length);
   for (let index = 0; index < maxLength; index += 1) {
-    const left = leftRun[index] ?? "";
-    const right = rightRun[index] ?? "";
+    const hasLeft = index < leftRun.length;
+    const hasRight = index < rightRun.length;
+    const left = hasLeft ? leftRun[index] : "";
+    const right = hasRight ? rightRun[index] : "";
     entries.push({
       left,
       right,
-      merged: buildMergedCandidateCell(left, right),
-      state: getChangedRunState(left, right)
+      merged: buildMergedCandidateCell(left, right, hasLeft, hasRight),
+      state: getChangedRunState(left, right, hasLeft, hasRight)
     });
   }
 }
-function getChangedRunState(left, right) {
-  if (left.length && right.length) {
-    return toComparableKey(left) === toComparableKey(right) ? "same" : "changed";
+function getChangedRunState(left, right, hasLeft, hasRight) {
+  if (hasLeft && hasRight) {
+    return left === right ? "same" : "changed";
   }
-  return left.length ? "left-only" : "right-only";
+  return hasLeft ? "left-only" : "right-only";
 }
-function buildMergedCandidateCell(left, right) {
-  if (!left.length || !right.length) {
-    return left || right;
+function buildMergedCandidateCell(left, right, hasLeft, hasRight) {
+  if (!hasLeft || !hasRight) {
+    return hasLeft ? left : right;
   }
   return mergeRunByLcs([left], [right]).join("\n");
 }
-function buildMergedContentFromRows(originalContent, conflictContent, rows) {
-  const merged = rows.map((row) => row.merged).join("\n");
-  const hasTrailingNewline = /\n$/.test(originalContent) || /\n$/.test(conflictContent);
-  return hasTrailingNewline ? `${merged}
-` : merged;
+function buildMergedContentFromRows(rows) {
+  return rows.map((row) => row.merged).join("\n");
 }
 function getDiffBackground(state, column) {
   if (state === "same") {
@@ -546,13 +591,10 @@ function getDiffBackground(state, column) {
 function normalizeLines(content) {
   return content.replace(/\r\n/g, "\n").split("\n");
 }
-function toComparableKey(line) {
-  return line.trim().replace(/\s+/g, " ");
-}
 function dedupeAdjacentBlocks(lines) {
   const deduped = [];
   for (const line of lines) {
-    if (deduped.length && toComparableKey(deduped[deduped.length - 1]) === toComparableKey(line)) {
+    if (deduped.length && deduped[deduped.length - 1] === line) {
       continue;
     }
     deduped.push(line);
@@ -567,4 +609,7 @@ function timestampSlug() {
 function buildSiblingFilePath(file, label) {
   const directory = file.parent?.path && file.parent.path !== "/" ? `${file.parent.path}/` : "";
   return (0, import_obsidian.normalizePath)(`${directory}${file.basename} (${label}).${file.extension}`);
+}
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
