@@ -285,7 +285,7 @@ class ConflictMergeModal extends Modal {
   constructor(
     app: App,
     private readonly pair: ConflictPair,
-    private readonly contents: { mergedContent: string; originalContent: string; conflictContent: string },
+    private readonly contents: MergeContents,
     private readonly settings: ConflictMergeSettings,
     private readonly onCloseComplete: () => void
   ) {
@@ -324,7 +324,7 @@ class ConflictMergeModal extends Modal {
       .setDesc("Choose which version to keep, or keep a merged copy for later review.")
       .addButton((button) => {
         button.setButtonText("Apply merge").setCta().onClick(async () => {
-          await this.applyToOriginal(this.contents.mergedContent, "Merged");
+          await this.applyMergedCandidate();
           this.close();
         });
       })
@@ -444,6 +444,11 @@ class ConflictMergeModal extends Modal {
     await this.openResolvedFile(this.pair.original);
   }
 
+  private async applyMergedCandidate(): Promise<void> {
+    const nextContent = await this.buildCurrentMergedContent();
+    await this.applyToOriginal(nextContent, "Merged");
+  }
+
   private async resolveConflictFileOnly(label: string): Promise<void> {
     if (this.settings.moveConflictToTrashAfterResolve) {
       await this.app.fileManager.trashFile(this.pair.conflict);
@@ -466,8 +471,20 @@ class ConflictMergeModal extends Modal {
 
   private async createMergedCopy(): Promise<void> {
     const mergedPath = buildSiblingFilePath(this.pair.original, `merged-${timestampSlug()}`);
-    await this.app.vault.create(mergedPath, this.contents.mergedContent);
+    const mergedContent = await this.buildCurrentMergedContent();
+    await this.app.vault.create(mergedPath, mergedContent);
     new Notice(`Created merged copy: ${mergedPath}`);
+  }
+
+  private async buildCurrentMergedContent(): Promise<string> {
+    const currentOriginalContent = await this.app.vault.cachedRead(this.pair.original);
+    if (currentOriginalContent === this.contents.originalContent) {
+      return this.contents.mergedContent;
+    }
+
+    const rows = buildLineDiffEntries(currentOriginalContent, this.contents.conflictContent);
+    new Notice("Original changed since this review opened. Rebuilt merged candidate before applying.");
+    return buildMergedContentFromRows(rows);
   }
 
   private async openResolvedFile(file: TFile): Promise<void> {

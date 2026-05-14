@@ -260,7 +260,7 @@ var ConflictMergeModal = class extends import_obsidian.Modal {
     this.buildSynchronizedCompare(contentEl, rows);
     new import_obsidian.Setting(contentEl).setName("Resolve conflict").setDesc("Choose which version to keep, or keep a merged copy for later review.").addButton((button) => {
       button.setButtonText("Apply merge").setCta().onClick(async () => {
-        await this.applyToOriginal(this.contents.mergedContent, "Merged");
+        await this.applyMergedCandidate();
         this.close();
       });
     }).addButton((button) => {
@@ -358,6 +358,10 @@ var ConflictMergeModal = class extends import_obsidian.Modal {
     await this.resolveConflictFileOnly(label);
     await this.openResolvedFile(this.pair.original);
   }
+  async applyMergedCandidate() {
+    const nextContent = await this.buildCurrentMergedContent();
+    await this.applyToOriginal(nextContent, "Merged");
+  }
   async resolveConflictFileOnly(label) {
     if (this.settings.moveConflictToTrashAfterResolve) {
       await this.app.fileManager.trashFile(this.pair.conflict);
@@ -376,8 +380,18 @@ var ConflictMergeModal = class extends import_obsidian.Modal {
   }
   async createMergedCopy() {
     const mergedPath = buildSiblingFilePath(this.pair.original, `merged-${timestampSlug()}`);
-    await this.app.vault.create(mergedPath, this.contents.mergedContent);
+    const mergedContent = await this.buildCurrentMergedContent();
+    await this.app.vault.create(mergedPath, mergedContent);
     new import_obsidian.Notice(`Created merged copy: ${mergedPath}`);
+  }
+  async buildCurrentMergedContent() {
+    const currentOriginalContent = await this.app.vault.cachedRead(this.pair.original);
+    if (currentOriginalContent === this.contents.originalContent) {
+      return this.contents.mergedContent;
+    }
+    const rows = buildLineDiffEntries(currentOriginalContent, this.contents.conflictContent);
+    new import_obsidian.Notice("Original changed since this review opened. Rebuilt merged candidate before applying.");
+    return buildMergedContentFromRows(rows);
   }
   async openResolvedFile(file) {
     const leaf = this.app.workspace.getMostRecentLeaf();
