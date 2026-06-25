@@ -17,7 +17,7 @@ It is designed for notes where conflicts usually come from appending new paragra
 - Builds additive merge candidates by preserving paragraphs from both sides.
 - Uses timestamp-aware insertion when paragraph timestamps can be recognized.
 - Falls back to stable ordered paragraph merging when timestamps are unavailable.
-- Lets users tune the conflict filename pattern and timestamp patterns in settings.
+- Lets users tune the conflict filename pattern in settings.
 
 ## Merge Policy
 
@@ -41,7 +41,7 @@ The plugin does not intentionally delete content from either side.
 - `2026-04-17T09:42:18`
 - `2026/04/17 09:42`
 
-The `<!-- edited: ... -->` form is recognized first because it is useful for append-only notes that preserve edit metadata.
+The `<!-- edited: ... -->` form is recognized as an end marker for a whole record block. A block may contain one paragraph or multiple paragraphs before the timestamp.
 
 ## Good Fits
 

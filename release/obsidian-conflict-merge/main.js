@@ -37,6 +37,7 @@ var DEFAULT_SETTINGS = {
     "\\s+conflict.*$"
   ]
 };
+var EDITED_TIMESTAMP_REGEX = /^\s*<!--\s*edited:\s*([^>]+?)\s*-->\s*$/i;
 var ConflictMergePlugin = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
@@ -216,8 +217,7 @@ var ConflictMergePlugin = class extends import_obsidian.Plugin {
   async mergePair(pair) {
     const originalContent = await this.app.vault.cachedRead(pair.original);
     const conflictContent = await this.app.vault.cachedRead(pair.conflict);
-    const rows = buildLineDiffEntries(originalContent, conflictContent);
-    const mergedContent = buildMergedContentFromRows(rows);
+    const mergedContent = buildMergedContent(originalContent, conflictContent);
     return { mergedContent, originalContent, conflictContent };
   }
   async openMergeModal(pair) {
@@ -256,7 +256,11 @@ var ConflictMergeModal = class extends import_obsidian.Modal {
       text: "Workflow: compare left/right, review the merged candidate, then choose how to resolve."
     });
     summary.style.marginTop = "8px";
-    const rows = buildLineDiffEntries(this.contents.originalContent, this.contents.conflictContent);
+    const rows = buildCompareEntries(
+      this.contents.originalContent,
+      this.contents.conflictContent,
+      this.contents.mergedContent
+    );
     this.buildSynchronizedCompare(contentEl, rows);
     new import_obsidian.Setting(contentEl).setName("Resolve conflict").setDesc("Choose which version to keep, or keep a merged copy for later review.").addButton((button) => {
       button.setButtonText("Apply merge").setCta().onClick(async () => {
@@ -389,9 +393,8 @@ var ConflictMergeModal = class extends import_obsidian.Modal {
     if (currentOriginalContent === this.contents.originalContent) {
       return this.contents.mergedContent;
     }
-    const rows = buildLineDiffEntries(currentOriginalContent, this.contents.conflictContent);
     new import_obsidian.Notice("Original changed since this review opened. Rebuilt merged candidate before applying.");
-    return buildMergedContentFromRows(rows);
+    return buildMergedContent(currentOriginalContent, this.contents.conflictContent);
   }
   async openResolvedFile(file) {
     const leaf = this.app.workspace.getMostRecentLeaf();
@@ -453,6 +456,227 @@ var ConflictMergeSettingTab = class extends import_obsidian.PluginSettingTab {
     });
   }
 };
+function buildMergedContent(leftContent, rightContent) {
+  const timestampMergedContent = buildEditedTimestampMergedContent(leftContent, rightContent);
+  if (timestampMergedContent !== null) {
+    return timestampMergedContent;
+  }
+  return buildMergedContentFromRows(buildLineDiffEntries(leftContent, rightContent));
+}
+function buildCompareEntries(leftContent, rightContent, mergedContent) {
+  const timestampRows = buildEditedTimestampCompareEntries(leftContent, rightContent, mergedContent);
+  if (timestampRows) {
+    return timestampRows;
+  }
+  return buildLineDiffEntries(leftContent, rightContent);
+}
+function buildEditedTimestampMergedContent(leftContent, rightContent) {
+  const leftDoc = parseEditedTimestampDocument(leftContent);
+  const rightDoc = parseEditedTimestampDocument(rightContent);
+  if (!leftDoc.blocks.length || !rightDoc.blocks.length) {
+    return null;
+  }
+  const prefix = mergeTimestampDocumentPrefix(leftDoc.prefix, rightDoc.prefix);
+  const blocksByKey = /* @__PURE__ */ new Map();
+  for (const block of [...leftDoc.blocks, ...rightDoc.blocks]) {
+    if (!blocksByKey.has(block.key)) {
+      blocksByKey.set(block.key, block);
+    }
+  }
+  const mergedBlocks = Array.from(blocksByKey.values()).sort(compareEditedTimestampBlocks);
+  const tails = dedupeTextParts([leftDoc.tail, rightDoc.tail].filter((tail) => tail.trim().length > 0));
+  const mergedContent = joinEditedTimestampParts(prefix, mergedBlocks.map((block) => block.content), tails);
+  return preserveTrailingNewline(mergedContent, leftContent, rightContent);
+}
+function buildEditedTimestampCompareEntries(leftContent, rightContent, mergedContent) {
+  const leftDoc = parseEditedTimestampDocument(leftContent);
+  const rightDoc = parseEditedTimestampDocument(rightContent);
+  const mergedDoc = parseEditedTimestampDocument(mergedContent);
+  if (!leftDoc.blocks.length || !rightDoc.blocks.length || !mergedDoc.blocks.length) {
+    return null;
+  }
+  const leftBlocksByKey = buildBlockKeyMap(leftDoc.blocks);
+  const rightBlocksByKey = buildBlockKeyMap(rightDoc.blocks);
+  const entries = [];
+  if (leftDoc.prefix !== rightDoc.prefix) {
+    entries.push({
+      left: leftDoc.prefix,
+      right: rightDoc.prefix,
+      merged: mergeTimestampDocumentPrefix(leftDoc.prefix, rightDoc.prefix),
+      state: "changed"
+    });
+  }
+  for (const mergedBlock of mergedDoc.blocks) {
+    const leftBlock = takeBlockByKey(leftBlocksByKey, mergedBlock.key);
+    const rightBlock = takeBlockByKey(rightBlocksByKey, mergedBlock.key);
+    entries.push({
+      left: leftBlock?.content ?? "",
+      right: rightBlock?.content ?? "",
+      merged: mergedBlock.content,
+      state: getBlockCompareState(leftBlock, rightBlock)
+    });
+  }
+  appendTailCompareEntry(entries, leftDoc.tail, rightDoc.tail);
+  return entries;
+}
+function parseEditedTimestampDocument(content) {
+  const lines = normalizeLines(content);
+  const prefixEnd = findStructuredPrefixEnd(lines);
+  const prefix = buildPrefixContent(lines, prefixEnd);
+  const blocks = [];
+  let currentLines = [];
+  for (let index = prefixEnd; index < lines.length; index += 1) {
+    const line = lines[index];
+    currentLines.push(line);
+    const timestamp = parseEditedTimestampLine(line);
+    if (timestamp === null) {
+      continue;
+    }
+    const blockContent = currentLines.join("\n");
+    blocks.push({
+      content: blockContent,
+      timestamp,
+      order: blocks.length,
+      key: normalizeBlockKey(blockContent)
+    });
+    currentLines = [];
+  }
+  return {
+    prefix,
+    blocks,
+    tail: currentLines.join("\n")
+  };
+}
+function buildPrefixContent(lines, prefixEnd) {
+  if (prefixEnd === 0) {
+    return "";
+  }
+  const prefix = lines.slice(0, prefixEnd).join("\n");
+  return prefixEnd < lines.length ? `${prefix}
+` : prefix;
+}
+function findStructuredPrefixEnd(lines) {
+  if (lines[0]?.trim() !== "---") {
+    return 0;
+  }
+  for (let index = 1; index < lines.length; index += 1) {
+    if (lines[index].trim() !== "---") {
+      continue;
+    }
+    let prefixEnd = index + 1;
+    while (prefixEnd < lines.length && lines[prefixEnd].trim() === "") {
+      prefixEnd += 1;
+    }
+    return prefixEnd;
+  }
+  return 0;
+}
+function parseEditedTimestampLine(line) {
+  const match = line.match(EDITED_TIMESTAMP_REGEX);
+  if (!match) {
+    return null;
+  }
+  return parseTimestampValue(match[1].trim());
+}
+function parseTimestampValue(value) {
+  const match = value.match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([+-])(\d{2}):?(\d{2}))?$/
+  );
+  if (!match) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  const [, year, month, day, hour, minute, second = "0", sign, offsetHour = "0", offsetMinute = "0"] = match;
+  const utcTime = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second)
+  );
+  if (!sign) {
+    return utcTime;
+  }
+  const offsetMs = (Number(offsetHour) * 60 + Number(offsetMinute)) * 60 * 1e3;
+  return sign === "+" ? utcTime - offsetMs : utcTime + offsetMs;
+}
+function mergeTimestampDocumentPrefix(leftPrefix, rightPrefix) {
+  if (leftPrefix === rightPrefix) {
+    return leftPrefix;
+  }
+  return buildMergedContentFromRows(buildLineDiffEntries(leftPrefix, rightPrefix));
+}
+function buildBlockKeyMap(blocks) {
+  const map = /* @__PURE__ */ new Map();
+  for (const block of blocks) {
+    const matchingBlocks = map.get(block.key) ?? [];
+    matchingBlocks.push(block);
+    map.set(block.key, matchingBlocks);
+  }
+  return map;
+}
+function takeBlockByKey(blocksByKey, key) {
+  const blocks = blocksByKey.get(key);
+  if (!blocks?.length) {
+    return null;
+  }
+  return blocks.shift() ?? null;
+}
+function getBlockCompareState(leftBlock, rightBlock) {
+  if (leftBlock && rightBlock) {
+    return "same";
+  }
+  return leftBlock ? "left-only" : "right-only";
+}
+function appendTailCompareEntry(entries, leftTail, rightTail) {
+  if (!leftTail.trim().length && !rightTail.trim().length) {
+    return;
+  }
+  entries.push({
+    left: leftTail,
+    right: rightTail,
+    merged: dedupeTextParts([leftTail, rightTail].filter((tail) => tail.trim().length > 0)).join(""),
+    state: leftTail === rightTail ? "same" : "changed"
+  });
+}
+function joinEditedTimestampParts(prefix, blocks, tails) {
+  const blockContent = blocks.join("\n");
+  const tailContent = tails.join("\n");
+  if (!tailContent.length) {
+    return `${prefix}${blockContent}`;
+  }
+  return `${prefix}${blockContent}${blockContent.length ? "\n" : ""}${tailContent}`;
+}
+function preserveTrailingNewline(content, ...sources) {
+  if (content.endsWith("\n") || !sources.some((source) => source.endsWith("\n"))) {
+    return content;
+  }
+  return `${content}
+`;
+}
+function compareEditedTimestampBlocks(left, right) {
+  if (left.timestamp !== right.timestamp) {
+    return left.timestamp - right.timestamp;
+  }
+  return left.order - right.order;
+}
+function normalizeBlockKey(content) {
+  return content.replace(/\r\n/g, "\n").trim();
+}
+function dedupeTextParts(parts) {
+  const seen = /* @__PURE__ */ new Set();
+  const deduped = [];
+  for (const part of parts) {
+    const key = normalizeBlockKey(part);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(part);
+  }
+  return deduped;
+}
 function mergeRunByLcs(originalRun, conflictRun) {
   const originalKeys = originalRun;
   const conflictKeys = conflictRun;

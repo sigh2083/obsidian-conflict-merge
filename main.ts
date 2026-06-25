@@ -52,6 +52,21 @@ interface LineDiffEntry {
   state: "same" | "changed" | "left-only" | "right-only";
 }
 
+interface EditedTimestampBlock {
+  content: string;
+  timestamp: number;
+  order: number;
+  key: string;
+}
+
+interface EditedTimestampDocument {
+  prefix: string;
+  blocks: EditedTimestampBlock[];
+  tail: string;
+}
+
+const EDITED_TIMESTAMP_REGEX = /^\s*<!--\s*edited:\s*([^>]+?)\s*-->\s*$/i;
+
 export default class ConflictMergePlugin extends Plugin {
   settings: ConflictMergeSettings = DEFAULT_SETTINGS;
   private processingPaths = new Set<string>();
@@ -268,8 +283,7 @@ export default class ConflictMergePlugin extends Plugin {
   async mergePair(pair: ConflictPair): Promise<{ mergedContent: string; originalContent: string; conflictContent: string }> {
     const originalContent = await this.app.vault.cachedRead(pair.original);
     const conflictContent = await this.app.vault.cachedRead(pair.conflict);
-    const rows = buildLineDiffEntries(originalContent, conflictContent);
-    const mergedContent = buildMergedContentFromRows(rows);
+    const mergedContent = buildMergedContent(originalContent, conflictContent);
     return { mergedContent, originalContent, conflictContent };
   }
 
@@ -316,7 +330,11 @@ class ConflictMergeModal extends Modal {
     });
     summary.style.marginTop = "8px";
 
-    const rows = buildLineDiffEntries(this.contents.originalContent, this.contents.conflictContent);
+    const rows = buildCompareEntries(
+      this.contents.originalContent,
+      this.contents.conflictContent,
+      this.contents.mergedContent
+    );
     this.buildSynchronizedCompare(contentEl, rows);
 
     new Setting(contentEl)
@@ -482,9 +500,8 @@ class ConflictMergeModal extends Modal {
       return this.contents.mergedContent;
     }
 
-    const rows = buildLineDiffEntries(currentOriginalContent, this.contents.conflictContent);
     new Notice("Original changed since this review opened. Rebuilt merged candidate before applying.");
-    return buildMergedContentFromRows(rows);
+    return buildMergedContent(currentOriginalContent, this.contents.conflictContent);
   }
 
   private async openResolvedFile(file: TFile): Promise<void> {
@@ -579,6 +596,290 @@ class ConflictMergeSettingTab extends PluginSettingTab {
       });
 
   }
+}
+
+function buildMergedContent(leftContent: string, rightContent: string): string {
+  const timestampMergedContent = buildEditedTimestampMergedContent(leftContent, rightContent);
+  if (timestampMergedContent !== null) {
+    return timestampMergedContent;
+  }
+
+  return buildMergedContentFromRows(buildLineDiffEntries(leftContent, rightContent));
+}
+
+function buildCompareEntries(leftContent: string, rightContent: string, mergedContent: string): LineDiffEntry[] {
+  const timestampRows = buildEditedTimestampCompareEntries(leftContent, rightContent, mergedContent);
+  if (timestampRows) {
+    return timestampRows;
+  }
+
+  return buildLineDiffEntries(leftContent, rightContent);
+}
+
+function buildEditedTimestampMergedContent(leftContent: string, rightContent: string): string | null {
+  const leftDoc = parseEditedTimestampDocument(leftContent);
+  const rightDoc = parseEditedTimestampDocument(rightContent);
+
+  if (!leftDoc.blocks.length || !rightDoc.blocks.length) {
+    return null;
+  }
+
+  const prefix = mergeTimestampDocumentPrefix(leftDoc.prefix, rightDoc.prefix);
+  const blocksByKey = new Map<string, EditedTimestampBlock>();
+
+  for (const block of [...leftDoc.blocks, ...rightDoc.blocks]) {
+    if (!blocksByKey.has(block.key)) {
+      blocksByKey.set(block.key, block);
+    }
+  }
+
+  const mergedBlocks = Array.from(blocksByKey.values()).sort(compareEditedTimestampBlocks);
+  const tails = dedupeTextParts([leftDoc.tail, rightDoc.tail].filter((tail) => tail.trim().length > 0));
+  const mergedContent = joinEditedTimestampParts(prefix, mergedBlocks.map((block) => block.content), tails);
+  return preserveTrailingNewline(mergedContent, leftContent, rightContent);
+}
+
+function buildEditedTimestampCompareEntries(
+  leftContent: string,
+  rightContent: string,
+  mergedContent: string
+): LineDiffEntry[] | null {
+  const leftDoc = parseEditedTimestampDocument(leftContent);
+  const rightDoc = parseEditedTimestampDocument(rightContent);
+  const mergedDoc = parseEditedTimestampDocument(mergedContent);
+
+  if (!leftDoc.blocks.length || !rightDoc.blocks.length || !mergedDoc.blocks.length) {
+    return null;
+  }
+
+  const leftBlocksByKey = buildBlockKeyMap(leftDoc.blocks);
+  const rightBlocksByKey = buildBlockKeyMap(rightDoc.blocks);
+  const entries: LineDiffEntry[] = [];
+
+  if (leftDoc.prefix !== rightDoc.prefix) {
+    entries.push({
+      left: leftDoc.prefix,
+      right: rightDoc.prefix,
+      merged: mergeTimestampDocumentPrefix(leftDoc.prefix, rightDoc.prefix),
+      state: "changed"
+    });
+  }
+
+  for (const mergedBlock of mergedDoc.blocks) {
+    const leftBlock = takeBlockByKey(leftBlocksByKey, mergedBlock.key);
+    const rightBlock = takeBlockByKey(rightBlocksByKey, mergedBlock.key);
+    entries.push({
+      left: leftBlock?.content ?? "",
+      right: rightBlock?.content ?? "",
+      merged: mergedBlock.content,
+      state: getBlockCompareState(leftBlock, rightBlock)
+    });
+  }
+
+  appendTailCompareEntry(entries, leftDoc.tail, rightDoc.tail);
+  return entries;
+}
+
+function parseEditedTimestampDocument(content: string): EditedTimestampDocument {
+  const lines = normalizeLines(content);
+  const prefixEnd = findStructuredPrefixEnd(lines);
+  const prefix = buildPrefixContent(lines, prefixEnd);
+  const blocks: EditedTimestampBlock[] = [];
+  let currentLines: string[] = [];
+
+  for (let index = prefixEnd; index < lines.length; index += 1) {
+    const line = lines[index];
+    currentLines.push(line);
+    const timestamp = parseEditedTimestampLine(line);
+    if (timestamp === null) {
+      continue;
+    }
+
+    const blockContent = currentLines.join("\n");
+    blocks.push({
+      content: blockContent,
+      timestamp,
+      order: blocks.length,
+      key: normalizeBlockKey(blockContent)
+    });
+    currentLines = [];
+  }
+
+  return {
+    prefix,
+    blocks,
+    tail: currentLines.join("\n")
+  };
+}
+
+function buildPrefixContent(lines: string[], prefixEnd: number): string {
+  if (prefixEnd === 0) {
+    return "";
+  }
+
+  const prefix = lines.slice(0, prefixEnd).join("\n");
+  return prefixEnd < lines.length ? `${prefix}\n` : prefix;
+}
+
+function findStructuredPrefixEnd(lines: string[]): number {
+  if (lines[0]?.trim() !== "---") {
+    return 0;
+  }
+
+  for (let index = 1; index < lines.length; index += 1) {
+    if (lines[index].trim() !== "---") {
+      continue;
+    }
+
+    let prefixEnd = index + 1;
+    while (prefixEnd < lines.length && lines[prefixEnd].trim() === "") {
+      prefixEnd += 1;
+    }
+    return prefixEnd;
+  }
+
+  return 0;
+}
+
+function parseEditedTimestampLine(line: string): number | null {
+  const match = line.match(EDITED_TIMESTAMP_REGEX);
+  if (!match) {
+    return null;
+  }
+
+  return parseTimestampValue(match[1].trim());
+}
+
+function parseTimestampValue(value: string): number | null {
+  const match = value.match(
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([+-])(\d{2}):?(\d{2}))?$/
+  );
+
+  if (!match) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+
+  const [, year, month, day, hour, minute, second = "0", sign, offsetHour = "0", offsetMinute = "0"] = match;
+  const utcTime = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second)
+  );
+
+  if (!sign) {
+    return utcTime;
+  }
+
+  const offsetMs = (Number(offsetHour) * 60 + Number(offsetMinute)) * 60 * 1000;
+  return sign === "+" ? utcTime - offsetMs : utcTime + offsetMs;
+}
+
+function mergeTimestampDocumentPrefix(leftPrefix: string, rightPrefix: string): string {
+  if (leftPrefix === rightPrefix) {
+    return leftPrefix;
+  }
+
+  return buildMergedContentFromRows(buildLineDiffEntries(leftPrefix, rightPrefix));
+}
+
+function buildBlockKeyMap(blocks: EditedTimestampBlock[]): Map<string, EditedTimestampBlock[]> {
+  const map = new Map<string, EditedTimestampBlock[]>();
+
+  for (const block of blocks) {
+    const matchingBlocks = map.get(block.key) ?? [];
+    matchingBlocks.push(block);
+    map.set(block.key, matchingBlocks);
+  }
+
+  return map;
+}
+
+function takeBlockByKey(
+  blocksByKey: Map<string, EditedTimestampBlock[]>,
+  key: string
+): EditedTimestampBlock | null {
+  const blocks = blocksByKey.get(key);
+  if (!blocks?.length) {
+    return null;
+  }
+
+  return blocks.shift() ?? null;
+}
+
+function getBlockCompareState(
+  leftBlock: EditedTimestampBlock | null,
+  rightBlock: EditedTimestampBlock | null
+): LineDiffEntry["state"] {
+  if (leftBlock && rightBlock) {
+    return "same";
+  }
+
+  return leftBlock ? "left-only" : "right-only";
+}
+
+function appendTailCompareEntry(entries: LineDiffEntry[], leftTail: string, rightTail: string): void {
+  if (!leftTail.trim().length && !rightTail.trim().length) {
+    return;
+  }
+
+  entries.push({
+    left: leftTail,
+    right: rightTail,
+    merged: dedupeTextParts([leftTail, rightTail].filter((tail) => tail.trim().length > 0)).join(""),
+    state: leftTail === rightTail ? "same" : "changed"
+  });
+}
+
+function joinEditedTimestampParts(prefix: string, blocks: string[], tails: string[]): string {
+  const blockContent = blocks.join("\n");
+  const tailContent = tails.join("\n");
+
+  if (!tailContent.length) {
+    return `${prefix}${blockContent}`;
+  }
+
+  return `${prefix}${blockContent}${blockContent.length ? "\n" : ""}${tailContent}`;
+}
+
+function preserveTrailingNewline(content: string, ...sources: string[]): string {
+  if (content.endsWith("\n") || !sources.some((source) => source.endsWith("\n"))) {
+    return content;
+  }
+
+  return `${content}\n`;
+}
+
+function compareEditedTimestampBlocks(left: EditedTimestampBlock, right: EditedTimestampBlock): number {
+  if (left.timestamp !== right.timestamp) {
+    return left.timestamp - right.timestamp;
+  }
+
+  return left.order - right.order;
+}
+
+function normalizeBlockKey(content: string): string {
+  return content.replace(/\r\n/g, "\n").trim();
+}
+
+function dedupeTextParts(parts: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const part of parts) {
+    const key = normalizeBlockKey(part);
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(part);
+  }
+
+  return deduped;
 }
 
 function mergeRunByLcs(originalRun: string[], conflictRun: string[]): string[] {

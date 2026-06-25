@@ -1,6 +1,6 @@
 {
   "name": "obsidian-conflict-merge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Review Obsidian Sync conflicted copies and build conservative additive merge candidates.",
   "main": "main.js",
   "license": "MIT",

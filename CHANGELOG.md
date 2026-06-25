@@ -2,8 +2,11 @@
 
 ## Unreleased
 
+## 0.1.1
+
 - Fix compare table styles so table rows are not affected by the old grid layout.
 - Fix merged output so files that already end with a newline do not receive an extra blank line.
+- Fix timestamped conflict merging by treating `<!-- edited: ... -->` as the end marker for a whole record block, then sorting merged blocks by their edited time.
 - Treat whitespace-only line changes as visible differences by default.
 - Document the future roadmap for changed-lines view, inline highlighting, navigation, editable merged candidates, and optional whitespace modes.
 
