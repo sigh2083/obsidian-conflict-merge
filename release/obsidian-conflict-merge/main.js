@@ -234,19 +234,31 @@ var ConflictMergeModal = class extends import_obsidian.Modal {
     this.contents = contents;
     this.settings = settings;
     this.onCloseComplete = onCloseComplete;
+    this.compareScrollEl = null;
+    this.actionSettingEl = null;
+    this.resizeHandler = () => {
+      this.fitModalToWindow();
+    };
   }
   onOpen() {
     const { contentEl, titleEl } = this;
     this.modalEl.addClass("conflict-merge-modal");
-    this.modalEl.style.width = "min(1600px, 96vw)";
-    this.modalEl.style.maxWidth = "96vw";
+    this.modalEl.style.width = "min(1600px, calc(100vw - 32px))";
+    this.modalEl.style.maxWidth = "calc(100vw - 32px)";
+    this.modalEl.style.height = "calc(100vh - 32px)";
+    this.modalEl.style.maxHeight = "calc(100vh - 32px)";
+    this.modalEl.style.display = "flex";
+    this.modalEl.style.flexDirection = "column";
     const modal = this.modalEl.querySelector(".modal");
     if (modal) {
-      modal.style.width = "min(1600px, 96vw)";
-      modal.style.maxWidth = "96vw";
+      modal.style.width = "min(1600px, calc(100vw - 32px))";
+      modal.style.maxWidth = "calc(100vw - 32px)";
+      modal.style.height = "calc(100vh - 32px)";
+      modal.style.maxHeight = "calc(100vh - 32px)";
     }
     titleEl.setText(`Merge conflict: ${this.pair.original.basename}`);
     contentEl.empty();
+    contentEl.addClass("conflict-merge-content");
     contentEl.createEl("div", {
       cls: "conflict-merge-meta",
       text: `Original: ${this.pair.original.path} | Conflict: ${this.pair.conflict.path}`
@@ -262,7 +274,7 @@ var ConflictMergeModal = class extends import_obsidian.Modal {
       this.contents.mergedContent
     );
     this.buildSynchronizedCompare(contentEl, rows);
-    new import_obsidian.Setting(contentEl).setName("Resolve conflict").setDesc("Choose which version to keep, or keep a merged copy for later review.").addButton((button) => {
+    const actionSetting = new import_obsidian.Setting(contentEl).setName("Resolve conflict").setDesc("Choose which version to keep, or keep a merged copy for later review.").addButton((button) => {
       button.setButtonText("Apply merge").setCta().onClick(async () => {
         await this.applyMergedCandidate();
         this.close();
@@ -288,9 +300,19 @@ var ConflictMergeModal = class extends import_obsidian.Modal {
         this.close();
       });
     });
+    actionSetting.settingEl.addClass("conflict-merge-actions");
+    this.actionSettingEl = actionSetting.settingEl;
+    window.addEventListener("resize", this.resizeHandler);
+    this.fitModalToWindow();
+    window.requestAnimationFrame(this.resizeHandler);
+    window.setTimeout(this.resizeHandler, 100);
   }
   onClose() {
+    window.removeEventListener("resize", this.resizeHandler);
     this.modalEl.removeClass("conflict-merge-modal");
+    this.contentEl.removeClass("conflict-merge-content");
+    this.compareScrollEl = null;
+    this.actionSettingEl = null;
     this.contentEl.empty();
     this.onCloseComplete();
   }
@@ -301,8 +323,8 @@ var ConflictMergeModal = class extends import_obsidian.Modal {
     wrap.style.borderRadius = "8px";
     wrap.style.overflow = "hidden";
     const scroll = wrap.createDiv({ cls: "conflict-compare-scroll" });
-    scroll.style.maxHeight = "64vh";
     scroll.style.overflow = "auto";
+    this.compareScrollEl = scroll;
     const table = scroll.createEl("table", { cls: "conflict-compare-table" });
     table.style.width = "100%";
     table.style.tableLayout = "fixed";
@@ -355,6 +377,28 @@ var ConflictMergeModal = class extends import_obsidian.Modal {
       cell.style.background = background;
     }
     cell.setText(value.length ? value : " ");
+  }
+  fitModalToWindow() {
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const margin = viewportHeight < 720 ? 8 : 16;
+    const modalHeight = Math.max(360, viewportHeight - margin * 2);
+    const modalWidth = Math.min(1600, Math.max(320, viewportWidth - margin * 2));
+    this.modalEl.style.width = `${modalWidth}px`;
+    this.modalEl.style.maxWidth = `${modalWidth}px`;
+    this.modalEl.style.height = `${modalHeight}px`;
+    this.modalEl.style.maxHeight = `${modalHeight}px`;
+    if (!this.compareScrollEl) {
+      return;
+    }
+    const modalRect = this.modalEl.getBoundingClientRect();
+    const scrollRect = this.compareScrollEl.getBoundingClientRect();
+    const actionsHeight = this.actionSettingEl?.offsetHeight ?? 88;
+    const bottomPadding = viewportHeight < 720 ? 14 : 22;
+    const availableHeight = Math.floor(modalRect.bottom - scrollRect.top - actionsHeight - bottomPadding);
+    const scrollHeight = Math.max(96, availableHeight);
+    this.compareScrollEl.style.height = `${scrollHeight}px`;
+    this.compareScrollEl.style.maxHeight = `${scrollHeight}px`;
   }
   async applyToOriginal(nextContent, label) {
     await this.maybeBackupOriginal();

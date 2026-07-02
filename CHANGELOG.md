@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.2
+
+- Keep merge conflict resolution buttons visible on shorter displays by fitting the modal to the current window height.
+- Move the compare table into a dynamically sized scroll region so long conflict reviews cannot push the action row off-screen.
+- Improve narrow and low-height modal spacing so the review remains usable around 1440x810.
+
 ## 0.1.1
 
 - Fix compare table styles so table rows are not affected by the old grid layout.

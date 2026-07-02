@@ -296,6 +296,12 @@ export default class ConflictMergePlugin extends Plugin {
 }
 
 class ConflictMergeModal extends Modal {
+  private compareScrollEl: HTMLElement | null = null;
+  private actionSettingEl: HTMLElement | null = null;
+  private readonly resizeHandler = (): void => {
+    this.fitModalToWindow();
+  };
+
   constructor(
     app: App,
     private readonly pair: ConflictPair,
@@ -309,15 +315,22 @@ class ConflictMergeModal extends Modal {
   onOpen(): void {
     const { contentEl, titleEl } = this;
     this.modalEl.addClass("conflict-merge-modal");
-    this.modalEl.style.width = "min(1600px, 96vw)";
-    this.modalEl.style.maxWidth = "96vw";
+    this.modalEl.style.width = "min(1600px, calc(100vw - 32px))";
+    this.modalEl.style.maxWidth = "calc(100vw - 32px)";
+    this.modalEl.style.height = "calc(100vh - 32px)";
+    this.modalEl.style.maxHeight = "calc(100vh - 32px)";
+    this.modalEl.style.display = "flex";
+    this.modalEl.style.flexDirection = "column";
     const modal = this.modalEl.querySelector(".modal") as HTMLElement | null;
     if (modal) {
-      modal.style.width = "min(1600px, 96vw)";
-      modal.style.maxWidth = "96vw";
+      modal.style.width = "min(1600px, calc(100vw - 32px))";
+      modal.style.maxWidth = "calc(100vw - 32px)";
+      modal.style.height = "calc(100vh - 32px)";
+      modal.style.maxHeight = "calc(100vh - 32px)";
     }
     titleEl.setText(`Merge conflict: ${this.pair.original.basename}`);
     contentEl.empty();
+    contentEl.addClass("conflict-merge-content");
 
     contentEl.createEl("div", {
       cls: "conflict-merge-meta",
@@ -337,7 +350,7 @@ class ConflictMergeModal extends Modal {
     );
     this.buildSynchronizedCompare(contentEl, rows);
 
-    new Setting(contentEl)
+    const actionSetting = new Setting(contentEl)
       .setName("Resolve conflict")
       .setDesc("Choose which version to keep, or keep a merged copy for later review.")
       .addButton((button) => {
@@ -370,10 +383,20 @@ class ConflictMergeModal extends Modal {
           this.close();
         });
       });
+    actionSetting.settingEl.addClass("conflict-merge-actions");
+    this.actionSettingEl = actionSetting.settingEl;
+    window.addEventListener("resize", this.resizeHandler);
+    this.fitModalToWindow();
+    window.requestAnimationFrame(this.resizeHandler);
+    window.setTimeout(this.resizeHandler, 100);
   }
 
   onClose(): void {
+    window.removeEventListener("resize", this.resizeHandler);
     this.modalEl.removeClass("conflict-merge-modal");
+    this.contentEl.removeClass("conflict-merge-content");
+    this.compareScrollEl = null;
+    this.actionSettingEl = null;
     this.contentEl.empty();
     this.onCloseComplete();
   }
@@ -386,8 +409,8 @@ class ConflictMergeModal extends Modal {
     wrap.style.overflow = "hidden";
 
     const scroll = wrap.createDiv({ cls: "conflict-compare-scroll" });
-    scroll.style.maxHeight = "64vh";
     scroll.style.overflow = "auto";
+    this.compareScrollEl = scroll;
 
     const table = scroll.createEl("table", { cls: "conflict-compare-table" });
     table.style.width = "100%";
@@ -453,6 +476,33 @@ class ConflictMergeModal extends Modal {
     }
 
     cell.setText(value.length ? value : " ");
+  }
+
+  private fitModalToWindow(): void {
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+    const margin = viewportHeight < 720 ? 8 : 16;
+    const modalHeight = Math.max(360, viewportHeight - margin * 2);
+    const modalWidth = Math.min(1600, Math.max(320, viewportWidth - margin * 2));
+
+    this.modalEl.style.width = `${modalWidth}px`;
+    this.modalEl.style.maxWidth = `${modalWidth}px`;
+    this.modalEl.style.height = `${modalHeight}px`;
+    this.modalEl.style.maxHeight = `${modalHeight}px`;
+
+    if (!this.compareScrollEl) {
+      return;
+    }
+
+    const modalRect = this.modalEl.getBoundingClientRect();
+    const scrollRect = this.compareScrollEl.getBoundingClientRect();
+    const actionsHeight = this.actionSettingEl?.offsetHeight ?? 88;
+    const bottomPadding = viewportHeight < 720 ? 14 : 22;
+    const availableHeight = Math.floor(modalRect.bottom - scrollRect.top - actionsHeight - bottomPadding);
+    const scrollHeight = Math.max(96, availableHeight);
+
+    this.compareScrollEl.style.height = `${scrollHeight}px`;
+    this.compareScrollEl.style.maxHeight = `${scrollHeight}px`;
   }
 
   private async applyToOriginal(nextContent: string, label: string): Promise<void> {

@@ -1,16 +1,32 @@
 .modal.conflict-merge-modal,
 .conflict-merge-modal .modal {
-  width: min(1600px, 96vw);
-  max-width: 96vw;
+  box-sizing: border-box;
+  width: min(1600px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  height: calc(100vh - 32px);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.conflict-merge-modal .modal-title {
+  flex: 0 0 auto;
 }
 
 .conflict-merge-modal .modal-content {
+  box-sizing: border-box;
   width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: hidden;
 }
 
 .conflict-compare-scroll {
-  max-height: min(64vh, 720px);
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -25,6 +41,10 @@
 }
 
 .conflict-compare-wrap {
+  flex: 1 1 auto;
+  min-height: min(180px, 32vh);
+  display: flex;
+  flex-direction: column;
   margin-top: 12px;
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
@@ -81,6 +101,33 @@
 .conflict-merge-meta {
   color: var(--text-muted);
   font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.conflict-merge-actions {
+  flex: 0 0 auto;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.conflict-merge-actions .setting-item-info {
+  min-width: 180px;
+}
+
+.conflict-merge-actions .setting-item-control {
+  min-height: 32px;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.conflict-merge-actions button {
+  min-height: 32px;
 }
 
 .conflict-diff-left-only {
@@ -99,4 +146,43 @@
 .conflict-diff-merged.conflict-diff-right-only,
 .conflict-diff-merged.conflict-diff-changed {
   background: color-mix(in srgb, var(--color-cyan) 18%, transparent);
+}
+
+@media (max-height: 700px) {
+  .modal.conflict-merge-modal,
+  .conflict-merge-modal .modal {
+    height: calc(100vh - 16px);
+    max-height: calc(100vh - 16px);
+  }
+
+  .conflict-compare-wrap {
+    min-height: 96px;
+    margin-top: 8px;
+  }
+
+  .conflict-compare-heading {
+    padding: 8px 10px;
+  }
+
+  .conflict-compare-cell {
+    padding: 4px 6px;
+    line-height: 1.4;
+  }
+
+  .conflict-merge-actions {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+}
+
+@media (max-width: 760px) {
+  .modal.conflict-merge-modal,
+  .conflict-merge-modal .modal {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+  }
+
+  .conflict-compare-table {
+    min-width: 840px;
+  }
 }
